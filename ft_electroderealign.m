@@ -1,6 +1,6 @@
 function [elec_realigned] = ft_electroderealign(cfg, elec_original)
 
-% FT_ELECTRODEREALING rotates, translates, scales and warps electrode positions. The
+% FT_ELECTRODEREALIGN rotates, translates, scales and warps electrode positions. The
 % default is to only rotate and translate, i.e. to do a rigid body transformation in
 % which only the coordinate system is changed. With the right settings if can apply
 % additional deformations to the input sensors (e.g. scale them to better fit the
@@ -58,6 +58,7 @@ function [elec_realigned] = ft_electroderealign(cfg, elec_original)
 %                        'fsaverage'       surface-based realignment with the freesurfer fsaverage brain
 %   cfg.channel        = Nx1 cell-array with selection of channels (default = 'all'),
 %                        see  FT_CHANNELSELECTION for details
+%   cfg.keepchannel    = string, 'yes' or 'no' (default = 'no')
 %   cfg.fiducial       = cell-array with the name of three fiducials used for
 %                        realigning (default = {'nasion', 'lpa', 'rpa'})
 %   cfg.casesensitive  = 'yes' or 'no', determines whether string comparisons
@@ -172,11 +173,17 @@ cfg = ft_checkconfig(cfg, 'forbidden', 'outline');
 % set the defaults
 cfg.warp          = ft_getopt(cfg, 'warp', 'rigidbody');
 cfg.channel       = ft_getopt(cfg, 'channel',  'all');
+cfg.keepchannel   = ft_getopt(cfg, 'keepchannel', 'no');
 cfg.feedback      = ft_getopt(cfg, 'feedback', 'no');
 cfg.casesensitive = ft_getopt(cfg, 'casesensitive', 'no');
 cfg.headshape     = ft_getopt(cfg, 'headshape', []);     % for triangulated head surface, without labels
 cfg.target        = ft_getopt(cfg, 'target',  []);       % for electrodes or fiducials, always with labels
 cfg.coordsys      = ft_getopt(cfg, 'coordsys');          % this allows for automatic template fiducial placement
+
+if isempty(cfg.target)
+  % remove the field, otherwise ft_checkconfig will complain
+  cfg = rmfield(cfg, 'target');
+end
 
 if ~isempty(cfg.coordsys) && isempty(cfg.target)
   % set the template fiducial locations according to the coordinate system
@@ -191,7 +198,7 @@ if ~isempty(cfg.coordsys) && isempty(cfg.target)
       cfg.target.label{2} = 'LPA';
       cfg.target.label{3} = 'RPA';
     otherwise
-      error('the %s coordinate system is not automatically supported, please specify fiducial details in cfg.target')
+      ft_error('the %s coordinate system is not automatically supported, please specify fiducial details in cfg.target')
   end
 end
 
@@ -208,11 +215,11 @@ switch cfg.method
 end % switch cfg.method
 
 if strcmp(cfg.method, 'fiducial') && isfield(cfg, 'warp') && ~isequal(cfg.warp, 'rigidbody')
-  warning('The method ''fiducial'' implies a rigid body tramsformation. See also http://bugzilla.fieldtriptoolbox.org/show_bug.cgi?id=1722');
+  ft_warning('The method ''fiducial'' implies a rigid body tramsformation. See also http://bugzilla.fieldtriptoolbox.org/show_bug.cgi?id=1722');
   cfg.warp = 'rigidbody';
 end
 if strcmp(cfg.method, 'fiducial') && isfield(cfg, 'warp') && ~isequal(cfg.warp, 'rigidbody')
-  warning('The method ''interactive'' implies a rigid body transformation. See also http://bugzilla.fieldtriptoolbox.org/show_bug.cgi?id=1722');
+  ft_warning('The method ''interactive'' implies a rigid body transformation. See also http://bugzilla.fieldtriptoolbox.org/show_bug.cgi?id=1722');
   cfg.warp = 'rigidbody';
 end
 
@@ -227,7 +234,7 @@ if isfield(cfg, 'target') && isa(cfg.target, 'config')
 end
 
 % the data can be passed as input arguments or can be read from disk
-hasdata = exist('data', 'var');
+hasdata = exist('elec_original', 'var');
 
 % get the electrode definition that should be warped
 if ~hasdata
@@ -271,7 +278,7 @@ if usetarget
     if isstruct(cfg.target{i})
       target(i) = cfg.target{i};
     else
-      target(i) = ft_read_sens(cfg.target{i});
+      target(i) = ft_read_sens(cfg.target{i}, 'senstype', 'eeg');
     end
   end
   clear tmp
@@ -304,7 +311,7 @@ if useheadshape
     % read the headshape from file
     headshape = ft_read_headshape(cfg.headshape);
   else
-    error('cfg.headshape is not specified correctly')
+    ft_error('cfg.headshape is not specified correctly')
   end
   if ~isfield(headshape, 'tri') && ~isfield(headshape, 'poly')
     % generate a closed triangulation from the surface points
@@ -400,14 +407,14 @@ elseif strcmp(cfg.method, 'headshape')
   elec.elecpos = elec.elecpos(datsel,:);
   
   norm.label = elec.label;
-  if strcmp(lower(cfg.warp), 'dykstra2012')
-    norm.elecpos = ft_warp_dykstra2012(elec.elecpos, headshape, cfg.feedback);
-  elseif strcmp(lower(cfg.warp), 'fsaverage')
+  if strcmp(cfg.warp, 'dykstra2012')
+    norm.elecpos = warp_dykstra2012(elec.elecpos, headshape, cfg.feedback);
+  elseif strcmp(cfg.warp, 'fsaverage')
     subj_pial = ft_read_headshape(cfg.headshape);
     [PATHSTR, NAME] = fileparts(cfg.headshape); % lh or rh
     subj_reg = ft_read_headshape([PATHSTR filesep NAME '.sphere.reg']);
     if ~isdir([cfg.fshome filesep 'subjects' filesep 'fsaverage' filesep 'surf'])
-      error(['freesurfer dir ' cfg.fshome filesep 'subjects' filesep 'fsaverage' filesep 'surf cannot be found'])
+      ft_error(['freesurfer dir ' cfg.fshome filesep 'subjects' filesep 'fsaverage' filesep 'surf cannot be found'])
     end
     fsavg_pial = ft_read_headshape([cfg.fshome filesep 'subjects' filesep 'fsaverage' filesep 'surf' filesep NAME '.pial']);
     fsavg_reg = ft_read_headshape([cfg.fshome filesep 'subjects' filesep 'fsaverage' filesep 'surf' filesep NAME '.sphere.reg']);
@@ -464,7 +471,7 @@ elseif strcmp(cfg.method, 'fiducial')
     elseif length(match_str(label, option6))==3
       cfg.fiducial = option6;
     else
-      error('could not determine consistent fiducials in the input and the target, please specify cfg.fiducial or cfg.coordsys')
+      ft_error('could not determine consistent fiducials in the input and the target, please specify cfg.fiducial or cfg.coordsys')
     end
   end
   fprintf('matching fiducials {''%s'', ''%s'', ''%s''}\n', cfg.fiducial{1}, cfg.fiducial{2}, cfg.fiducial{3});
@@ -476,7 +483,7 @@ elseif strcmp(cfg.method, 'fiducial')
   elec.elecpos   = elec.elecpos(datsel,:);
   
   if length(cfg.fiducial)~=3
-    error('you must specify exactly three fiducials');
+    ft_error('you must specify exactly three fiducials');
   end
   
   % do case-insensitive search for fiducial locations
@@ -484,7 +491,7 @@ elseif strcmp(cfg.method, 'fiducial')
   lpa_indx = match_str(lower(elec.label), lower(cfg.fiducial{2}));
   rpa_indx = match_str(lower(elec.label), lower(cfg.fiducial{3}));
   if length(nas_indx)~=1 || length(lpa_indx)~=1 || length(rpa_indx)~=1
-    error('not all fiducials were found in the electrode set');
+    ft_error('not all fiducials were found in the electrode set');
   end
   elec_nas = elec.elecpos(nas_indx,:);
   elec_lpa = elec.elecpos(lpa_indx,:);
@@ -503,7 +510,7 @@ elseif strcmp(cfg.method, 'fiducial')
     lpa_indx = match_str(lower(target(i).label), lower(cfg.fiducial{2}));
     rpa_indx = match_str(lower(target(i).label), lower(cfg.fiducial{3}));
     if length(nas_indx)~=1 || length(lpa_indx)~=1 || length(rpa_indx)~=1
-      error(sprintf('not all fiducials were found in template %d', i));
+      ft_error('not all fiducials were found in template %d', i);
     end
     tmpl_nas(i,:) = target(i).elecpos(nas_indx,:);
     tmpl_lpa(i,:) = target(i).elecpos(lpa_indx,:);
@@ -629,7 +636,7 @@ elseif strcmp(cfg.method, 'moveinward')
   norm.elecpos = moveinward(elec.elecpos, cfg.moveinward);
   
 else
-  error('unknown method');
+  ft_error('unknown method');
 end % if method
 
 
@@ -668,7 +675,7 @@ switch cfg.method
     elec_realigned.label = label_original;
     
   otherwise
-    error('unknown method');
+    ft_error('unknown method');
 end
 
 % the coordinate system is in general not defined after transformation
@@ -686,8 +693,12 @@ switch cfg.method
     if isfield(headshape, 'coordsys')
       elec_realigned.coordsys = headshape.coordsys;
     end
-    if isfield(elec_original, 'coordsys') && (strcmp(cfg.warp, 'dykstra2012') || strcmp(cfg.warp, 'fsaverage'))
-      elec_realigned.coordsys = elec_original.coordsys; % this warp simply moves the electrodes in the same coordinate space
+    if isfield(elec_original, 'coordsys')
+      if strcmp(cfg.warp, 'dykstra2012') % this warp simply moves the electrodes in the same coordinate space
+        elec_realigned.coordsys = elec_original.coordsys;
+      elseif strcmp(cfg.warp, 'fsaverage')
+        elec_realigned.coordsys = 'fsaverage';
+      end
     end
   case 'fiducial'
     if isfield(target, 'coordsys')
@@ -701,7 +712,15 @@ switch cfg.method
       elec_realigned.coordsys = elec_original.coordsys;
     end
   otherwise
-    error('unknown method');
+    ft_error('unknown method');
+end
+
+if istrue(cfg.keepchannel)
+  % append the channels that are not realigned
+  [~, idx] = setdiff(elec_original.label, elec_realigned.label);
+  idx = sort(idx);
+  elec_realigned.label = [elec_realigned.label; elec_original.label(idx)];
+  elec_realigned.elecpos = [elec_realigned.elecpos; elec_original.elecpos(idx,:)];
 end
 
 % channel positions are identical to the electrode positions (this was checked at the start)
