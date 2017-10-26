@@ -72,11 +72,19 @@ if numel(refindx)~=1 && numel(refindx)~=size(tra,1)
   error('mi can only be computed using a single, or all channels as reference');
 end
 
+if numel(lags)>1 || lags~=0,
+  if numel(refindx)>1, ft_error('with multiple lags, or with a lag~=0 only a single refindx is allowed'); end
+  refdata = input(refindx,:);
+  n       = size(refdata,2);
+  
+  output = zeros(size(input,1), numel(lags));
+  for k = 1:numel(lags)
+    fprintf('computing mutualinformation for time lag in samples %d\n', lags(k));
+
 switch method
   case 'ibtb'
     % check whether the required toolbox is available
-    ft_hastoolbox('ibtb', 1);
-    
+    ft_hastoolbox('ibtb', 1);    
     % set some options
     histmethod = ft_getopt(varargin, 'histmethod', 'eqpop');
     numbin     = ft_getopt(varargin, 'numbin',     10);
@@ -91,9 +99,42 @@ switch method
     % deal with NaNs in the input data, e.g. trial boundaries
     finitevals = isfinite(input);
     
-    nchans = size(tra,1); 
-    n      = size(input, 2);
-    output = zeros(nchans, numel(refindx), numel(lags)) + nan;
+    tmp = ft_connectivity_mutualinformation(input, 'refdata', tmpdata, 'opts', opts, 'histmethod', histmethod, 'numbin', numbin);
+    output(:,k) = tmp(1:end-1);
+  end
+  return;
+  
+  
+end
+
+if ~isempty(refdata)
+  input   = cat(1, input, refdata);
+  refindx = size(input,1);
+end
+
+
+% check validity of refindx
+if length(refindx)~=numel(refindx)
+  % could be channelcmb indexing
+  ft_error('channelcmb indexing is not supported');
+end
+
+
+% get rid of nans in the input
+notsel = sum(~isfinite(input))>0;
+input  = input(:,~notsel);
+
+[nchan, nsmp] = size(input);
+output        = zeros(nchan, numel(refindx))+nan;
+
+for k = 1:numel(refindx)
+  signal1 = input(refindx(k),:);
+  
+  % discretize signal1
+  signal1 = binr(signal1, nsmp, numbin, histmethod);
+
+  for m = setdiff(1:size(input,1),refindx(k))
+    signal2 = input(m,:);
     
     % for each lag
     for m = 1:numel(lags)
